@@ -196,6 +196,15 @@ static uint32_t ms_get_udp_request_id(void)
 }
 
 
+extern long long my_gettime(void);
+long long my_gettime()
+{
+  struct timespec ts;
+  clock_gettime(CLOCK_MONOTONIC,&ts);
+  return ts.tv_sec*1000000000LL + ts.tv_nsec;
+}
+
+
 /**
  * initialize current task structure
  *
@@ -1902,6 +1911,86 @@ static void ms_ascii_complete_nread(ms_conn_t *c)
 } /* ms_ascii_complete_nread */
 
 
+long long SLA_bins[] = {
+10000, 20000, 30000, 40000, 50000, 60000, 70000, 80000, 90000, 100000,
+110000, 120000, 130000, 140000, 150000, 160000, 170000, 180000, 190000, 200000,
+210000, 220000, 230000, 240000, 250000, 260000, 270000, 280000, 290000, 300000,
+310000, 320000, 330000, 340000, 350000, 360000, 370000, 380000, 390000, 400000,
+410000, 420000, 430000, 440000, 450000, 460000, 470000, 480000, 490000, 500000,
+510000, 520000, 530000, 540000, 550000, 560000, 570000, 580000, 590000, 600000,
+610000, 620000, 630000, 640000, 650000, 660000, 670000, 680000, 690000, 700000,
+710000, 720000, 730000, 740000, 750000, 760000, 770000, 780000, 790000, 800000,
+810000, 820000, 830000, 840000, 850000, 860000, 870000, 880000, 890000, 900000,
+910000, 920000, 930000, 940000, 950000, 960000, 970000, 980000, 990000, 1000000,
+1100000, 1200000, 1300000, 1400000, 1500000, 1600000, 1700000, 1800000, 1900000,
+2000000, 3000000, 4000000, 5000000, 6000000, 7000000, 8000000, 9000000, 10000000,
+20000000, 30000000, 40000000, 50000000, 60000000, 70000000, 80000000,   90000000,
+100000000, 200000000, 300000000, 400000000, 500000000, 600000000, 700000000, 800000000, 900000000,
+1000000000ll, 10000000000ll, 0 };
+
+struct SLA_stats_t {
+        #define SLA_bin_cnt (sizeof(SLA_bins)/sizeof(SLA_bins[0]))
+        long long* bin_lmt;
+        long long bin_cnt [SLA_bin_cnt];
+} SLA_stats = { .bin_lmt = SLA_bins };
+
+
+static int find_bucket(int n, long long search, long long array[]) {
+   int first = 0;
+   int last = n - 1;
+   int middle = (first+last)/2;
+
+   while( first <= last )
+   {
+      if ( array[middle] < search )
+         first = middle + 1;
+      else if ( array[middle] == search )
+         return middle;
+      else
+         last = middle - 1;
+
+      middle = (first + last)/2;
+   }
+   return first;
+}
+
+
+static int find_SLA_bucket(int v)
+{
+  return find_bucket(SLA_bin_cnt-1, v, SLA_stats.bin_lmt);
+}
+
+
+void clear_SLA_stats(void);
+void clear_SLA_stats(void)
+{
+  memset(SLA_stats.bin_cnt, 0, sizeof(SLA_stats.bin_cnt));
+}
+
+
+void print_SLA_stats(void);
+void print_SLA_stats(void)
+{
+  int i, max_i = 0;
+  long long total_cnt = 0;
+  for( i = 0; ; ++i ) {
+    if( SLA_stats.bin_cnt[i] ) {
+      max_i = i;
+      total_cnt += SLA_stats.bin_cnt[i];
+    }
+    if( !SLA_stats.bin_lmt[i] )
+      break;
+  }
+
+  for( i = 0; i <= max_i; ++i ) {
+    if( SLA_stats.bin_cnt[i] )
+      printf("SLA_Result: %lld %lld %lf\n", SLA_stats.bin_lmt[i], SLA_stats.bin_cnt[i], SLA_stats.bin_cnt[i]*100./total_cnt);
+    if( !SLA_stats.bin_lmt[i] )
+      break;
+  }
+}
+
+
 /**
  * For binary protocol, after store the data into the local
  * buffer, run this function to handle the data.
@@ -1917,6 +2006,7 @@ static void ms_bin_complete_nread(ms_conn_t *c)
   int extlen= c->binary_header.response.extlen;
   int keylen= c->binary_header.response.keylen;
   uint8_t opcode= c->binary_header.response.opcode;
+  int done = 0;
 
   /* not get command or not include value, just return */
   if (((opcode != PROTOCOL_BINARY_CMD_GET)
@@ -1970,12 +2060,23 @@ static void ms_bin_complete_nread(ms_conn_t *c)
     if (c->mlget_task.value_index == c->mlget_task.mlget_num - 1)
     {
       ms_reset_conn(c, false);
+      done = 1;
     }
   }
   else
   {
     /* single get */
     ms_reset_conn(c, false);
+    done = 1;
+  }
+
+
+  if(done){
+    long long t = c->t_send;
+    long long ct = my_gettime();
+    long long d = ct - t;
+    int i = find_SLA_bucket(d);
+    SLA_stats.bin_cnt[i]++;
   }
 } /* ms_bin_complete_nread */
 
@@ -2245,6 +2346,10 @@ static int ms_transmit(ms_conn_t *c)
     ssize_t res;
     struct msghdr *m= &c->msglist[c->msgcurr];
 
+    {
+      long long t = my_gettime();
+      c->t_send = t;
+    }
     res= sendmsg(c->sfd, m, 0);
     if (res > 0)
     {
@@ -2460,6 +2565,8 @@ static bool ms_need_yield(ms_conn_t *c)
   {
     gettimeofday(&curr_time, NULL);
     time_diff= ms_time_diff(&ms_thread->startup_time, &curr_time);
+    if( time_diff < 10000000 )
+        return false;
     tps=
       (int64_t)((task->get_opt
                  + task->set_opt) / ((uint64_t)time_diff / 1000000));

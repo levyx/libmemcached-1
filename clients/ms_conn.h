@@ -152,6 +152,8 @@ typedef struct conn
   int iovsize;              /* number of elements allocated in iov[] */
   int iovused;              /* number of elements used in iov[] */
 
+  long long t_send;         /* time send has started */
+
   struct msghdr *msglist;
   int msgsize;              /* number of elements allocated in msglist[] */
   int msgused;              /* number of elements used in msglist[] */

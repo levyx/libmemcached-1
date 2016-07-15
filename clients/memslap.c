@@ -821,6 +821,9 @@ static void ms_print_memslap_stats(struct timeval *start_time,
 pthread_barrier_t barr;
 pthread_barrier_t barr_warmup;
 struct timeval start_time, end_time;
+void clear_SLA_stats(void);
+void print_SLA_stats(void);
+
 
 static int can_go = 0;
 static void catcher(int signum) {
@@ -835,6 +838,7 @@ static void catcher(int signum) {
     case SIGUSR2:
                   if(can_go)
                   {
+                    clear_SLA_stats();
                     ms_statistic_clear();
                     gettimeofday(&start_time, NULL);
                   }
@@ -890,6 +894,7 @@ static void ms_monitor_slap_mode()
     usleep(1000);
   }
   ms_global.finish_warmup= true;
+  clear_SLA_stats();
   ms_statistic_clear();
   ms_stats.cmd_get = 0;
   ms_stats.cmd_set = 0;
@@ -943,6 +948,7 @@ static void ms_monitor_slap_mode()
   }
 
   ms_print_memslap_stats(&start_time, &end_time);
+  print_SLA_stats();
 } /* ms_monitor_slap_mode */
 
 
