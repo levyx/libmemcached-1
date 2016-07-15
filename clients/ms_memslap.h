@@ -56,6 +56,7 @@ typedef enum
   OPT_OVERWRITE= 'o',
   OPT_TPS= 'P',
   OPT_REP_WRITE_SRV= 'p',
+  OPT_PPID= 'i',
 } ms_options_t;
 
 /* global statistic of response time */
@@ -92,7 +93,7 @@ typedef struct stats
 /* lock adapter */
 typedef struct sync_lock
 {
-  uint32_t count;
+  volatile uint32_t count;
   pthread_mutex_t lock;
   pthread_cond_t cond;
 } ms_sync_lock_t;

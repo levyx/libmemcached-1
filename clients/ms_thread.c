@@ -242,6 +242,7 @@ static int ms_setup_thread(ms_thread_ctx_t *thread_ctx)
  *
  * @return void*
  */
+extern pthread_barrier_t barr;
 static void *ms_worker_libevent(void *arg)
 {
   ms_thread_t *ms_thread= NULL;
@@ -253,7 +254,8 @@ static void *ms_worker_libevent(void *arg)
    */
   if (ms_setting.ncpu > 1)
   {
-    ms_set_thread_cpu_affinity(thread_ctx->thd_idx % ms_setting.ncpu);
+   /* HACK: disable this mechanism as affinity will be applied externally */
+   /* ms_set_thread_cpu_affinity(thread_ctx->thd_idx % ms_setting.ncpu); */
   }
 
   if (ms_setup_thread(thread_ctx) != 0)
@@ -261,13 +263,21 @@ static void *ms_worker_libevent(void *arg)
     exit(1);
   }
 
-  /* each thread with a timer */
-  ms_clock_handler(0, 0, 0);
 
   pthread_mutex_lock(&ms_global.init_lock.lock);
   ms_global.init_lock.count++;
   pthread_cond_signal(&ms_global.init_lock.cond);
   pthread_mutex_unlock(&ms_global.init_lock.lock);
+
+  int rc = pthread_barrier_wait(&barr);
+  if(rc != 0 && rc != PTHREAD_BARRIER_SERIAL_THREAD)
+  {
+    fprintf(stderr,"pthread_barrier_wait failed\n");
+    exit(-1);
+  }
+
+  /* each thread with a timer */
+  ms_clock_handler(0, 0, 0);
 
   ms_thread= pthread_getspecific(ms_thread_key);
   event_base_loop(ms_thread->base, 0);

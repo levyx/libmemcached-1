@@ -96,6 +96,8 @@ static struct option long_options[]=
     OPT_HELP               },
   { (OPTIONSTRING)"version",        no_argument,                  NULL,
     OPT_VERSION            },
+  { (OPTIONSTRING)"ppid",           required_argument,            NULL,
+    OPT_PPID          },
   { 0, 0, 0, 0 },
 };
 
@@ -289,6 +291,9 @@ static const char *ms_lookup_help(ms_options_t option)
 
   case OPT_REP_WRITE_SRV:
     return "The first nth servers can write data, e.g.: --rep_write=2.";
+
+  case OPT_PPID:
+    return "Process to notify with SIGUSR2 signal when warm up finishes.";
 
   default:
     return "Forgot to document this option :)";
@@ -531,6 +536,10 @@ static void ms_options_parse(int argc, char *argv[])
       ms_setting.udp= true;
       break;
 
+    case OPT_PPID:       /* --ppid */
+      ms_setting.ppid= atoi(optarg);
+      break;
+
     case OPT_EXPIRE:        /* --exp_verify or -e */
       ms_setting.exp_ver_per= atof(optarg);
       if ((ms_setting.exp_ver_per <= 0) || (ms_setting.exp_ver_per > 1.0))
@@ -673,6 +682,19 @@ static void ms_statistic_init()
 } /* ms_statistic_init */
 
 
+/* Reset the statistic structure */
+static void ms_statistic_clear(void)
+{
+  pthread_mutex_lock(&ms_statistic.stat_mutex);
+  memset(&ms_statistic.get_stat, 0, sizeof(ms_statistic.get_stat));
+  memset(&ms_statistic.set_stat, 0, sizeof(ms_statistic.set_stat));
+  memset(&ms_statistic.total_stat, 0, sizeof(ms_statistic.total_stat));
+  ms_init_stats(&ms_statistic.get_stat, "Get");
+  ms_init_stats(&ms_statistic.set_stat, "Set");
+  ms_init_stats(&ms_statistic.total_stat, "Total");
+  pthread_mutex_unlock(&ms_statistic.stat_mutex);
+}
+
 /* initialize the global state structure */
 static void ms_stats_init()
 {
@@ -790,19 +812,55 @@ static void ms_print_memslap_stats(struct timeval *start_time,
                           ms_stats.bytes_written
                           + ms_stats.bytes_read) / 1024 / 1024
                  / ((double)time_diff / 1000000));
-  assert(pos <= buf);
 
   fprintf(stdout, "%s", buf);
   fflush(stdout);
 } /* ms_print_memslap_stats */
 
 
+pthread_barrier_t barr;
+pthread_barrier_t barr_warmup;
+struct timeval start_time, end_time;
+
+static int can_go = 0;
+static void catcher(int signum) {
+  switch (signum) {
+    case SIGUSR1:
+                  puts("caught SIGUSR1\n");
+                  can_go = 0;
+                  ms_global.time_out= true;
+                  break;
+    case SIGCONT:
+                  break;
+    case SIGUSR2:
+                  if(can_go)
+                  {
+                    ms_statistic_clear();
+                    gettimeofday(&start_time, NULL);
+                  }
+                  else
+                    can_go = 1;
+                  break;
+    default: printf("caught unexpected signal %d\n", signum);
+  }
+}
+
+
 /* the loop of the main thread, wait the work threads to complete */
 static void ms_monitor_slap_mode()
 {
   int second= 0;
-  struct timeval start_time, end_time;
 
+  if(pthread_barrier_init(&barr, NULL, ms_setting.nthreads))
+  {
+      fprintf(stderr,"Could not create a barrier\n");
+      exit(1);
+  }
+  if(pthread_barrier_init(&barr_warmup, NULL, ms_setting.nthreads+1))
+  {
+      fprintf(stderr,"Could not create a barrier\n");
+      exit(1);
+  }
   /* Wait all the threads complete initialization. */
   pthread_mutex_lock(&ms_global.init_lock.lock);
   while (ms_global.init_lock.count < ms_setting.nthreads)
@@ -815,21 +873,31 @@ static void ms_monitor_slap_mode()
   /* only when there is no set operation it need warm up */
   if (ms_setting.cmd_distr[CMD_SET].cmd_prop < PROP_ERROR)
   {
+    fprintf(stderr,"Warming up\n");
     /* Wait all the connects complete warm up. */
     pthread_mutex_lock(&ms_global.warmup_lock.lock);
-    while (ms_global.warmup_lock.count < ms_setting.nconns)
+    while (ms_global.warmup_lock.count + 0 < ms_stats.active_conns )
     {
       pthread_cond_wait(&ms_global.warmup_lock.cond, &ms_global.warmup_lock.lock);
     }
     pthread_mutex_unlock(&ms_global.warmup_lock.lock);
+    fprintf(stderr,"Warmup finished\n");
+    /* TODO: BUG: warm up not always finishes */
+  }
+  fprintf(stderr,"Run time %d\n", ms_setting.run_time);
+  kill(ms_setting.ppid?ms_setting.ppid:getppid(), SIGUSR2);
+  while (!can_go) {
+    usleep(1000);
   }
   ms_global.finish_warmup= true;
-
+  ms_statistic_clear();
+  ms_stats.cmd_get = 0;
+  ms_stats.cmd_set = 0;
   /* running in "run time" mode, user specify run time */
   if (ms_setting.run_time > 0)
   {
     gettimeofday(&start_time, NULL);
-    while (1)
+    while (can_go)
     {
       sleep(1);
       second++;
@@ -881,6 +949,10 @@ static void ms_monitor_slap_mode()
 /* the main function */
 int main(int argc, char *argv[])
 {
+  signal(SIGUSR1, catcher);
+  signal(SIGUSR2, catcher);
+  signal(SIGCONT, catcher);
+
   srandom((unsigned int)time(NULL));
   ms_global_struct_init();
 

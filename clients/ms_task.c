@@ -977,7 +977,8 @@ static void ms_update_stat_result(ms_conn_t *c)
   gettimeofday(&c->end_time, NULL);
   uint64_t time_diff= (uint64_t)ms_time_diff(&c->start_time, &c->end_time);
 
-  pthread_mutex_lock(&ms_statistic.stat_mutex);
+/* HACK: disable statistics mutex for performance reason */
+/*  pthread_mutex_lock(&ms_statistic.stat_mutex); */
 
   switch (c->precmd.cmd)
   {
@@ -998,7 +999,7 @@ static void ms_update_stat_result(ms_conn_t *c)
   } /* switch */
 
   ms_record_event(&ms_statistic.total_stat, time_diff, get_miss);
-  pthread_mutex_unlock(&ms_statistic.stat_mutex);
+/*  pthread_mutex_unlock(&ms_statistic.stat_mutex); */
 } /* ms_update_stat_result */
 
 

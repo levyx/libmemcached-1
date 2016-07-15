@@ -113,6 +113,7 @@ typedef struct setting
   uint32_t ncpu;                             /* cpu count of this system */
   uint32_t nthreads;                         /* total thread count, must equal or less than cpu cores */
   uint32_t nconns;                      /* total conn count, must multiply by total thread count */
+  uint32_t ppid;                        /* pid of a process to signal when warmup finishes */
   int64_t exec_num;                     /* total execute number */
   int run_time;                         /* total run time */
 

@@ -834,7 +834,6 @@ static int ms_network_connect(ms_conn_t *c,
       return -1;
     }
 
-    setsockopt(sfd, SOL_SOCKET, SO_REUSEADDR, (void *)&flags, sizeof(flags));
     if (is_udp)
     {
       ms_maximize_sndbuf(sfd);
