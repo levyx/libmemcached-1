@@ -874,8 +874,8 @@ static void ms_monitor_slap_mode()
   }
   pthread_mutex_unlock(&ms_global.init_lock.lock);
 
-
-  /* Warm up always: even if there are set operations scheduled */
+  /* only when there is no set operation it need warm up */
+  if (ms_setting.cmd_distr[CMD_SET].cmd_prop < PROP_ERROR)
   {
     fprintf(stderr,"Warming up\n");
     /* Wait all the connects complete warm up. */
