@@ -889,12 +889,10 @@ static void ms_monitor_slap_mode()
     /* TODO: BUG: warm up not always finishes */
   }
   fprintf(stderr,"Run time %d\n", ms_setting.run_time);
-  //kill(ms_setting.ppid?ms_setting.ppid:getppid(), SIGUSR2);
-  //kill(getpid(), SIGUSR2);
+  kill(ms_setting.ppid?ms_setting.ppid:getppid(), SIGUSR2);
   while (!can_go) {
     usleep(1000);
   }
-  fprintf(stderr, "Go!\n");
   ms_global.finish_warmup= true;
   clear_SLA_stats();
   ms_statistic_clear();
